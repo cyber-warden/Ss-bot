@@ -349,7 +349,7 @@ async def handle_file(client, message):
                     f"Name: {file_name}\n"
                     f"Size: {file_size_mb:.2f} MB\n"
                     f"Type: {file_type}\n\n"
-                    f"{color(\"This doesn't appear to be a video file.\", 'warning')} I can only generate screenshots from videos."
+                    #f"{color(\"This doesn't appear to be a video file.\", 'warning')} I can only generate screenshots from videos."
                 )
                 
                 await status_message.edit_text(error_message)
