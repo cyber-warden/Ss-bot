@@ -3,24 +3,28 @@ import time
 import asyncio
 import subprocess
 import re
-import random
+import logging
 from datetime import timedelta
 from pyrogram import Client, filters, emoji
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait, MessageNotModified
 import tempfile
-import logging
-import math
-import shutil
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("bot.log")
+    ]
+)
 logger = logging.getLogger(__name__)
 
-# Bot configuration
-API_ID = 28271744
-API_HASH = "1df4d2b4dc77dc5fd65622f9d8f6814d"
-BOT_TOKEN = "7466186150:AAH3OyHD5MUYW6YzPfQHFtL-uZUHNNDZKBM"
+# Bot configuration from environment variables with fallback to hardcoded values
+API_ID = int(os.environ.get("API_ID", "28271744"))
+API_HASH = os.environ.get("API_HASH", "1df4d2b4dc77dc5fd65622f9d8f6814d")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "7466186150:AAH3OyHD5MUYW6YzPfQHFtL-uZUHNNDZKBM")
 
 # Initialize the Pyrogram client
 app = Client("screenshot_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -36,7 +40,6 @@ LOADING_ANIMATIONS = {
     "spinner": ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
     "dots": ["⠋", "⠙", "⠚", "⠞", "⠖", "⠦", "⠴", "⠲", "⠳", "⠓"],
     "pulse": ["█▁▁▁▁", "▁█▁▁▁", "▁▁█▁▁", "▁▁▁█▁", "▁▁▁▁█", "▁▁▁█▁", "▁▁█▁▁", "▁█▁▁▁"],
-    "wave": ["▁▂▃▄▅▆▇█▇▆▅▄▃▂▁"],
     "clock": ["🕛", "🕐", "🕑", "🕒", "🕓", "🕔", "🕕", "🕖", "🕗", "🕘", "🕙", "🕚"]
 }
 
@@ -77,6 +80,15 @@ def color(text, color_type):
 # Helper function to create section
 def create_section(title, content):
     return f"{color(title, 'primary')}\n{content}\n"
+
+# Check if FFmpeg is installed
+def check_ffmpeg():
+    try:
+        subprocess.run(["ffmpeg", "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return True
+    except (subprocess.SubprocessError, FileNotFoundError):
+        logger.error("FFmpeg is not installed or not in PATH")
+        return False
 
 @app.on_message(filters.command("start"))
 async def start_command(client, message):
@@ -140,6 +152,29 @@ async def handle_callback(client, callback_query):
         )
         await callback_query.message.edit_text(examples_text)
     
+    elif data.startswith("count_"):
+        await handle_count_callback(client, callback_query)
+    
+    elif data == "process_another":
+        await callback_query.message.reply_text(
+            f"{EMOJIS['video']} {color('Ready for Another Video', 'primary')}\n\n"
+            f"Send me another video file to generate screenshots!"
+        )
+    
+    elif data.startswith("feedback_"):
+        feedback_type = data.split("_")[1]
+        if feedback_type == "positive":
+            await callback_query.message.edit_text(
+                f"{EMOJIS['success']} {color('Thank You!', 'success')}\n\n"
+                f"I'm glad you liked the screenshots! Feel free to send another video anytime."
+            )
+        else:
+            await callback_query.message.edit_text(
+                f"{EMOJIS['warning']} {color('Feedback Received', 'warning')}\n\n"
+                f"I'm sorry you experienced issues. Your feedback helps me improve.\n\n"
+                f"Please try again with a different video or contact my developer."
+            )
+    
     # Answer the callback query to remove the loading indicator
     await callback_query.answer()
 
@@ -169,7 +204,7 @@ async def help_command(client, message):
 async def about_command(client, message):
     """Handle the /about command."""
     about_text = (
-        f"{EMOJIS['movie_camera']} {color('Screenshot Generator Bot', 'primary')}\n\n"
+        f"{EMOJIS['video']} {color('Screenshot Generator Bot', 'primary')}\n\n"
         f"A powerful bot that generates high-quality screenshots from your videos.\n\n"
         f"{color('Features:', 'secondary')}\n"
         f"• Extract screenshots from any video\n"
@@ -177,7 +212,7 @@ async def about_command(client, message):
         f"• Get timestamps for each screenshot\n"
         f"• Beautiful progress animations\n"
         f"• Support for large video files\n\n"
-        f"{color('Version:', 'accent')} 2.0"
+        f"{color('Version:', 'accent')} 2.1"
     )
     
     await message.reply_text(about_text)
@@ -339,7 +374,7 @@ async def handle_file(client, message):
                     f"{EMOJIS['document']} {color('Name:', 'secondary')} {file_name}\n"
                     f"{EMOJIS['size']} {color('Size:', 'secondary')} {file_size_mb:.2f} MB\n"
                     f"{EMOJIS['document']} {color('Type:', 'secondary')} {file_type}\n\n"
-                    f"{color('This doesn't appear to be a video file.', 'warning')} I can only generate screenshots from videos."
+                    f"{color('This doesn\'t appear to be a video file.', 'warning')} I can only generate screenshots from videos."
                 )
                 
                 await status_message.edit_text(error_message)
@@ -356,7 +391,6 @@ async def handle_file(client, message):
         )
         await status_message.edit_text(error_message)
 
-@app.on_callback_query(filters.regex(r"^count_(\d+)$"))
 async def handle_count_callback(client, callback_query):
     """Handle screenshot count selection from inline keyboard."""
     chat_id = callback_query.message.chat.id
@@ -541,32 +575,38 @@ async def alternative_download(client, chat_id, message_id, file_path, status_me
             animated_progress(status_message, "Downloading large file", 10, "pulse")
         )
         
-        # Get the message with the file
-        message = await client.get_messages(chat_id, message_id)
-        
-        # Download without progress tracking (more reliable for large files)
-        await client.download_media(message, file_path)
-        
-        # Cancel the animation task
-        download_task.cancel()
-        
-        # Check if file exists and has content
-        if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-            success_message = (
-                f"{EMOJIS['success']} {color('Download Complete', 'success')}\n\n"
-                f"Successfully downloaded the file.\n"
-                f"Proceeding to generate screenshots..."
-            )
-            await status_message.edit_text(success_message)
-            return True
-        else:
-            error_message = (
-                f"{EMOJIS['error']} {color('Download Failed', 'error')}\n\n"
-                f"The file is empty or could not be downloaded.\n"
-                f"Please try again with a different video."
-            )
-            await status_message.edit_text(error_message)
-            return False
+        try:
+            # Get the message with the file
+            message = await client.get_messages(chat_id, message_id)
+            
+            # Download without progress tracking (more reliable for large files)
+            await client.download_media(message, file_path)
+            
+            # Cancel the animation task
+            download_task.cancel()
+            
+            # Check if file exists and has content
+            if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                success_message = (
+                    f"{EMOJIS['success']} {color('Download Complete', 'success')}\n\n"
+                    f"Successfully downloaded the file.\n"
+                    f"Proceeding to generate screenshots..."
+                )
+                await status_message.edit_text(success_message)
+                return True
+            else:
+                error_message = (
+                    f"{EMOJIS['error']} {color('Download Failed', 'error')}\n\n"
+                    f"The file is empty or could not be downloaded.\n"
+                    f"Please try again with a different video."
+                )
+                await status_message.edit_text(error_message)
+                return False
+        except Exception as e:
+            # Cancel the animation task if it's still running
+            if not download_task.done():
+                download_task.cancel()
+            raise e
             
     except Exception as e:
         logger.error(f"Alternative download error: {e}")
@@ -581,6 +621,15 @@ async def alternative_download(client, chat_id, message_id, file_path, status_me
 
 async def generate_screenshots(client, message, chat_id):
     """Generate and send screenshots from the video using FFmpeg."""
+    # Check if FFmpeg is installed
+    if not check_ffmpeg():
+        await message.edit_text(
+            f"{EMOJIS['error']} {color('FFmpeg Not Found', 'error')}\n\n"
+            f"FFmpeg is required to generate screenshots but it's not installed on the server.\n"
+            f"Please contact the bot administrator."
+        )
+        return
+    
     # Get user state
     state = user_states[chat_id]
     file_id = state["file_id"]
@@ -815,5 +864,5 @@ async def generate_screenshots(client, message, chat_id):
 
 # Run the bot
 if __name__ == "__main__":
-    print("Starting Enhanced Screenshot Bot...")
+    print("Starting Screenshot Bot...")
     app.run()
