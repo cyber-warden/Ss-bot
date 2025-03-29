@@ -15,8 +15,6 @@ import threading
 import http.server
 import socketserver
 import requests
-from urllib.parse import urljoin
-import random
 
 # Configure logging
 logging.basicConfig(
@@ -61,6 +59,9 @@ COLORS = {
     "warning": "__",       # Italic
 }
 
+# Video file extensions
+VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.webm', '.m4v', '.3gp']
+
 # Helper function to apply color
 def color(text, color_type):
     return f"{COLORS[color_type]}{text}{COLORS[color_type]}"
@@ -91,6 +92,17 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
+# Check if a file is a video based on extension or mime type
+def is_video_file(file_name, mime_type=None):
+    if mime_type and mime_type.startswith("video/"):
+        return True
+    
+    if file_name:
+        _, ext = os.path.splitext(file_name.lower())
+        return ext in VIDEO_EXTENSIONS
+    
+    return False
+
 @app.on_message(filters.command("start"))
 async def start_command(client, message):
     """Handle the /start command."""
@@ -101,21 +113,13 @@ async def start_command(client, message):
         f"{color(f'Welcome, {user_name}!', 'primary')}\n\n"
         f"I'm your {color('Screenshot Generator Bot', 'accent')}. I can create screenshots from any video you send me.\n\n"
         f"{color('How to use me:', 'secondary')}\n"
-        f"1. Send me a video file\n"
+        f"1. Send me a video file (MP4, MKV, etc.)\n"
         f"2. Tell me how many screenshots you want (1-15)\n"
         f"3. I'll generate high-quality screenshots for you!\n\n"
         f"Type /help to see all available commands."
     )
     
-    # Create keyboard with buttons
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("Help", callback_data="help"),
-            InlineKeyboardButton("Examples", callback_data="examples")
-        ]
-    ])
-    
-    await message.reply_text(welcome_text, reply_markup=keyboard)
+    await message.reply_text(welcome_text)
 
 @app.on_callback_query()
 async def handle_callback(client, callback_query):
@@ -126,38 +130,7 @@ async def handle_callback(client, callback_query):
         
         data = callback_query.data
         
-        if data == "help":
-            help_text = (
-                f"{color('Available Commands', 'primary')}\n\n"
-                f"/start - Start the bot\n"
-                f"/help - Show this help message\n"
-                f"/about - Information about the bot\n\n"
-                f"{color('Tips & Tricks:', 'secondary')}\n"
-                f"• For best results, send high-quality videos\n"
-                f"• You can request up to {MAX_SCREENSHOTS} screenshots per video\n"
-                f"• Large videos may take longer to process\n"
-                f"• Screenshots are taken at equal intervals throughout the video"
-            )
-            await callback_query.message.edit_text(help_text)
-            
-        elif data == "examples":
-            examples_text = (
-                f"{color('How Screenshots Work', 'primary')}\n\n"
-                f"When you send a video and request 5 screenshots, I'll:\n"
-                f"1. Analyze your video's duration\n"
-                f"2. Take 5 screenshots at equal intervals\n"
-                f"3. Send them back with timestamps\n\n"
-                f"{color('Example:', 'secondary')}\n"
-                f"For a 10-minute video with 5 screenshots:\n"
-                f"• Screenshot 1: at 1:00\n"
-                f"• Screenshot 2: at 3:00\n"
-                f"• Screenshot 3: at 5:00\n"
-                f"• Screenshot 4: at 7:00\n"
-                f"• Screenshot 5: at 9:00"
-            )
-            await callback_query.message.edit_text(examples_text)
-        
-        elif data.startswith("count_"):
+        if data.startswith("count_"):
             await handle_count_callback(client, callback_query)
         
         elif data == "process_another":
@@ -190,20 +163,38 @@ async def help_command(client, message):
         f"{color('Available Commands', 'primary')}\n\n"
         f"/start - Start the bot\n"
         f"/help - Show this help message\n"
-        f"/about - Information about the bot\n\n"
+        f"/about - Information about the bot\n"
+        f"/status - Check if the bot is running\n"
+        f"/examples - See how screenshots work\n\n"
         f"{color('How to use:', 'secondary')}\n"
-        f"1. Send me a video file\n"
+        f"1. Send me a video file (MP4, MKV, etc.)\n"
         f"2. I'll show you the file details\n"
         f"3. Tell me how many screenshots you want (1-{MAX_SCREENSHOTS})\n"
         f"4. I'll generate and send the screenshots\n\n"
         f"{color('Note:', 'accent')} For large files, the download may take some time. Please be patient."
     )
     
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Examples", callback_data="examples")]
-    ])
+    await message.reply_text(help_text)
+
+@app.on_message(filters.command("examples"))
+async def examples_command(client, message):
+    """Handle the /examples command."""
+    examples_text = (
+        f"{color('How Screenshots Work', 'primary')}\n\n"
+        f"When you send a video and request 5 screenshots, I'll:\n"
+        f"1. Analyze your video's duration\n"
+        f"2. Take 5 screenshots at equal intervals\n"
+        f"3. Send them back with timestamps\n\n"
+        f"{color('Example:', 'secondary')}\n"
+        f"For a 10-minute video with 5 screenshots:\n"
+        f"• Screenshot 1: at 1:00\n"
+        f"• Screenshot 2: at 3:00\n"
+        f"• Screenshot 3: at 5:00\n"
+        f"• Screenshot 4: at 7:00\n"
+        f"• Screenshot 5: at 9:00"
+    )
     
-    await message.reply_text(help_text, reply_markup=keyboard)
+    await message.reply_text(examples_text)
 
 @app.on_message(filters.command("about"))
 async def about_command(client, message):
@@ -212,11 +203,12 @@ async def about_command(client, message):
         f"{color('Screenshot Generator Bot', 'primary')}\n\n"
         f"A bot that generates high-quality screenshots from your videos.\n\n"
         f"{color('Features:', 'secondary')}\n"
-        f"• Extract screenshots from any video\n"
+        f"• Extract screenshots from any video format\n"
         f"• Choose how many screenshots you want (up to {MAX_SCREENSHOTS})\n"
         f"• Get timestamps for each screenshot\n"
-        f"• Support for large video files\n\n"
-        f"{color('Version:', 'accent')} 2.3"
+        f"• Support for large video files\n"
+        f"• Works with MP4, MKV, and other video formats\n\n"
+        f"{color('Version:', 'accent')} 2.4"
     )
     
     await message.reply_text(about_text)
@@ -354,16 +346,16 @@ async def handle_file(client, message):
             # Format file size in MB
             file_size_mb = file_size / (1024 * 1024)
             
-            # Check if document is a video by mime type
+            # Check if document is a video by mime type or extension
             mime_type = message.document.mime_type
-            is_video = mime_type and mime_type.startswith("video/")
+            is_video_doc = is_video_file(file_name, mime_type)
             
             # Warn if file is large
             size_warning = ""
             if file_size > MAX_DIRECT_DOWNLOAD_SIZE:
                 size_warning = f"\n\n{color('This is a large file. Download may take some time.', 'warning')}"
             
-            if is_video:
+            if is_video_doc:
                 # Create file details message
                 file_details = (
                     f"{color('File Details', 'primary')}\n\n"
@@ -404,7 +396,7 @@ async def handle_file(client, message):
                     f"Name: {file_name}\n"
                     f"Size: {file_size_mb:.2f} MB\n"
                     f"Type: {file_type}\n\n"
-                    #f"{color(\"This doesn't appear to be a video file.\", 'warning')} I can only generate screenshots from videos."
+                   # f"{color(\"This doesn't appear to be a video file.\", 'warning')} I can only generate screenshots from videos."
                 )
                 
                 await status_message.edit_text(error_message)
@@ -727,9 +719,6 @@ async def generate_screenshots(client, message, chat_id):
                         "-of", "default=noprint_wrappers=1:nokey=1", 
                         video_path
                     ]
-                    duration = float(subprocess.
-                        video_path
-                    ]
                     duration = float(subprocess.check_output(cmd).decode('utf-8').strip())
                     state["duration"] = duration
                 except Exception as e:
@@ -749,6 +738,7 @@ async def generate_screenshots(client, message, chat_id):
             
             # Generate screenshots using FFmpeg
             screenshot_paths = []
+            
             for i in range(screenshot_count):
                 # Calculate timestamp for this screenshot (distribute evenly)
                 timestamp = duration * (i + 0.5) / screenshot_count  # Add 0.5 to avoid very beginning/end
