@@ -27,9 +27,8 @@ logger = logging.getLogger(__name__)
 # Bot configuration from environment variables with fallback to hardcoded values
 API_ID = int(os.environ.get("API_ID", "28271744"))
 API_HASH = os.environ.get("API_HASH", "1df4d2b4dc77dc5fd65622f9d8f6814d")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "7466186150:AAH3OyHD5MUYW6YzPfQHFtL-uZUHNNDZKBM"))
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "7466186150:AAH3OyHD5MUYW6YzPfQHFtL-uZUHNNDZKBM")
 PORT = int(os.environ.get("PORT", 8080))  # Get port from environment or default to 8080
-
 # Initialize the Pyrogram client
 app = Client("screenshot_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
